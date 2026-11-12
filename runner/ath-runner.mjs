@@ -266,6 +266,9 @@ async function gameBuild(p, io) {
 }
 
 const HANDLERS = { "media.render": mediaRender, "visual.compare": visualCompare, "game.build": gameBuild };
+// The named ATHOS assistants (Founder 2026-11-12: "each worker gets its own name and job"); same names as Spaidbot's
+// spaidbot/sb-athos-team.mjs. Stamped on every result so receipts say who did the work.
+export const ASSISTANT = (kind, p = {}) => kind === "media.render" ? (p.format === "clip" ? "ATHOS · Reel" : "ATHOS · Herald") : kind === "visual.compare" ? "ATHOS · Lens" : kind === "game.build" ? "ATHOS · Forge" : "ATHOS";
 
 // ---------- queue gate ------------------------------------------------------------------------------------------------
 let tok = null, tokAt = 0;
@@ -310,13 +313,14 @@ async function work(minutes) {
     await gate("heartbeat");
     const job = await gate("claim");
     if (!job || job.paused || job.capped) { log(job?.paused ? "paused by the Founder switch" : job?.capped ? "daily job cap reached" : "queue empty"); break; }
-    log(`claimed ${job.kind} ${job.id} (try ${job.attempts})`);
+    const who = ASSISTANT(job.kind, job.payload || {});
+    log(`${who} claimed ${job.kind} ${job.id} (try ${job.attempts})`);
     const dir = mkdtempSync(join(tmpdir(), "job-"));
     let ok = false, result = null, error = null;
-    try { result = await HANDLERS[job.kind](job.payload || {}, ioFor(job, dir)); ok = true; }
+    try { result = { assistant: who, ...(await HANDLERS[job.kind](job.payload || {}, ioFor(job, dir))) }; ok = true; }
     catch (e) { error = String(e?.message || e).slice(0, 900); }
     const fin = await gate("finish", { id: job.id, ok, result, error });
-    log(`${job.kind} ${job.id} -> ${fin ? fin.status : "LATE (lease lost; finish refused)"}${error ? " · " + error : ""}`);
+    log(`${who} · ${job.kind} ${job.id} -> ${fin ? fin.status : "LATE (lease lost; finish refused)"}${error ? " · " + error : ""}`);
     if (ok) log("outputs:", (result.outputs || []).map((o) => `${o.path} ${o.bytes}B sha256=${o.sha256.slice(0, 12)}`).join(" , "));
     done++;
   }
