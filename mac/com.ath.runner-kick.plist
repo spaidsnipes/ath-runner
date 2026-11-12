@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key><string>com.ath.runner-kick</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/dspaidnoosleep/bin/node</string>
+		<string>/Users/dspaidnoosleep/ath-runner/mac/runner-kick.mjs</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>NODE_EXTRA_CA_CERTS</key><string>/Users/dspaidnoosleep/spaidbot-app/ops/certs/prod-ca-2021.crt</string>
+		<key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin</string>
+	</dict>
+	<key>StartInterval</key><integer>120</integer>
+	<key>RunAtLoad</key><true/>
+	<key>ProcessType</key><string>Background</string>
+	<key>StandardOutPath</key><string>/Users/dspaidnoosleep/Library/Logs/ath-runner-kick.log</string>
+	<key>StandardErrorPath</key><string>/Users/dspaidnoosleep/Library/Logs/ath-runner-kick.log</string>
+	<key>WorkingDirectory</key><string>/Users/dspaidnoosleep/ath-runner</string>
+</dict>
+</plist>
