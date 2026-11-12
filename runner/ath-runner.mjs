@@ -94,9 +94,11 @@ async function speak(text, wav) {
 }
 
 // ---------- media.render ----------------------------------------------------------------------------------------------
-function textCards(dir, lines, W, H, seconds, brand, lower = false) {
+function textCards(dir, lines, W, H, seconds, brand, lower = false, endCard = 0) {
   // Each line gets its own time window; text goes through files (no escaping, expansion off).
-  const f = [], size = Math.round(W * (W < H ? 0.062 : 0.045)), slot = seconds / Math.max(1, lines.length);
+  // endCard > 0: the last endCard seconds are a brand end card (lines stop before it).
+  const linesEnd = seconds - endCard;
+  const f = [], size = Math.round(W * (W < H ? 0.062 : 0.045)), slot = linesEnd / Math.max(1, lines.length);
   lines.forEach((line, i) => {
     const file = join(dir, `line${i}.txt`); writeFileSync(file, wrap(line, W < H ? 22 : 36));
     const a = (i * slot).toFixed(2), b = ((i + 1) * slot - 0.15).toFixed(2);
@@ -105,7 +107,11 @@ function textCards(dir, lines, W, H, seconds, brand, lower = false) {
       `:alpha='if(lt(t,${a}+0.35),(t-${a})/0.35,1)'`);
   });
   if (brand) { const file = join(dir, "brand.txt"); writeFileSync(file, brand);
-    f.push(`drawtext=fontfile=${FONT}:textfile=${file}:expansion=none:fontsize=${Math.round(size * 0.55)}:fontcolor=0xD4AF37:x=(w-text_w)/2:y=h-text_h-${Math.round(H * 0.07)}`); }
+    const e = linesEnd.toFixed(2);
+    f.push(`drawtext=fontfile=${FONT}:textfile=${file}:expansion=none:fontsize=${Math.round(size * 0.55)}:fontcolor=0xD4AF37:x=(w-text_w)/2:y=h-text_h-${Math.round(H * 0.07)}` +
+      (endCard ? `:enable='lt(t,${e})'` : ""));
+    if (endCard) f.push(`drawtext=fontfile=${FONT}:textfile=${file}:expansion=none:fontsize=${Math.round(size * 1.15)}:fontcolor=0xD4AF37` +
+      `:x=(w-text_w)/2:y=(h-text_h)/2:shadowcolor=black@0.7:shadowx=3:shadowy=3:enable='gte(t,${e})':alpha='if(lt(t,${e}+0.3),(t-${e})/0.3,1)'`); }
   return f;
 }
 function wrap(s, n) { const out = []; let cur = ""; for (const w of s.split(/\s+/)) { if ((cur + " " + w).trim().length > n && cur) { out.push(cur); cur = w; } else cur = (cur + " " + w).trim(); } if (cur) out.push(cur); return out.join("\n"); }
@@ -118,19 +124,24 @@ async function mediaRender(p, io) {
   const lines = (Array.isArray(p.lines) ? p.lines : []).slice(0, 4).map((l, i) => str(l, 70, `lines[${i}]`)).filter(Boolean);
   const brand = str(p.brand ?? (format === "commercial" ? "Above The Hill" : ""), 40, "brand");
   const dir = io.dir, out = join(dir, `${format}.mp4`);
-  const seconds = format === "commercial" ? 15 : num(p.duration, 3, 60, 15, "duration");
+  // Commercial: length follows the voice (voice + 1 s brand end card, 6..15 s) so there is never a silent tail.
+  const END_CARD = 1, MAX_C = 15, MIN_C = 6;
+  let seconds = format === "commercial" ? MAX_C : num(p.duration, 3, 60, 15, "duration");
   let voice = null, voiceWav = null;
   if (voiceText) {
     voiceWav = join(dir, "voice.wav"); voice = await speak(voiceText, voiceWav);
     voice.seconds = (await probe(voiceWav)).durationSeconds;
-    if (voice.seconds > seconds - 0.3) {
-      const tempo = voice.seconds / (seconds - 0.5);
+    const room = format === "commercial" ? MAX_C - END_CARD : seconds - 0.3;
+    if (voice.seconds > room) {
+      const tempo = voice.seconds / (room - 0.2);
       if (tempo > 1.3) throw new Error(`voice script runs ${voice.seconds}s; it must fit in ${seconds}s (shorten it)`);
       const fast = join(dir, "voice-fit.wav"); await must("ffmpeg", ["-y", "-v", "error", "-i", voiceWav, "-af", `atempo=${tempo.toFixed(3)}`, fast]);
       voiceWav = fast; voice.tempo = Number(tempo.toFixed(3)); voice.seconds = (await probe(fast)).durationSeconds;
     }
   }
-  const cards = textCards(dir, lines, W, H, seconds, brand, format === "clip");
+  if (format === "commercial") seconds = Math.min(MAX_C, Math.max(MIN_C, Math.ceil((voice.seconds + 0.25 + END_CARD) * 10) / 10));
+  const endCard = format === "commercial" && brand ? END_CARD : 0;
+  const cards = textCards(dir, lines, W, H, seconds, brand, format === "clip", endCard);
   const args = ["-y", "-v", "error"];
   let vf, srcAudio = false;
   if (format === "commercial") {
@@ -171,8 +182,13 @@ async function mediaRender(p, io) {
   const info = await probe(out), mean = await meanVolume(out);
   if (Math.abs(info.durationSeconds - seconds) > 0.6) throw new Error(`render is ${info.durationSeconds}s, expected ${seconds}s`);
   if (voiceWav && (mean == null || mean < -45)) throw new Error(`voice not audible in the render (mean ${mean} dB)`);
+  let silentTail = null;
+  if (format === "commercial") {
+    silentTail = Number(Math.max(0, info.durationSeconds - voice.seconds).toFixed(2));
+    if (silentTail > END_CARD + 0.6) throw new Error(`commercial has ${silentTail}s after the voice ends (max ${END_CARD + 0.6}s)`);
+  }
   const outputs = [await io.store(out, `${format}.mp4`), await io.store(poster, "poster.png")];
-  return { format, aspect, title: lines[0] || null, ...info, meanVolumeDb: mean, voiceBakedIn: !!voiceWav && info.hasAudio, voice, outputs,
+  return { format, aspect, title: lines[0] || null, ...info, meanVolumeDb: mean, voiceBakedIn: !!voiceWav && info.hasAudio, voice, afterVoiceSeconds: silentTail, endCardSeconds: endCard || null, outputs,
     note: voice?.engine === "espeak-ng" ? "voice used the espeak-ng fallback (robotic); Piper was unavailable on this run" : null };
 }
 
