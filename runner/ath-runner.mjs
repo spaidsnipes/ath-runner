@@ -164,7 +164,7 @@ async function mediaRender(p, io) {
   } else if (srcAudio) af = `[0:a]atrim=0:${seconds}[a]`;
   else { args.push("-f", "lavfi", "-t", String(seconds), "-i", "anullsrc=r=48000:cl=stereo"); af = `[1:a]anull[a]`; }
   args.push("-filter_complex", vf + ";" + af, "-map", "[v]", "-map", "[a]", "-t", String(seconds),
-    "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-movflags", "+faststart", out);
+    "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2", "-movflags", "+faststart", out);
   await must("ffmpeg", args, { timeoutMs: 600000 });
   const poster = join(dir, "poster.png");
   await must("ffmpeg", ["-y", "-v", "error", "-ss", String(Math.min(2, seconds / 3)), "-i", out, "-frames:v", "1", poster]);
