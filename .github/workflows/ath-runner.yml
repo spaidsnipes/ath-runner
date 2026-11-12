@@ -1,0 +1,40 @@
+name: ATH runner
+# The GitHub Actions lane of the ath_ops queue (Spaidbot / ATHOS own workers, $0, runs with every Mac off).
+# Auth: GitHub OIDC (audience "ath-runner") verified by the Supabase Edge Function ath-runner. No stored secret anywhere.
+# Budget: this repo is PRIVATE (2,000 free minutes/month on GitHub Free). One check-in every 30 minutes is at most
+# ~1,440 minutes/month even if GitHub fires every slot; the tools and the work only run when a job is waiting.
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: ath-runner
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Check in (exits at once when the queue is empty)
+        id: q
+        run: node runner/ath-runner.mjs --peek
+      - name: Tools (ffmpeg, page capture, free voice)
+        if: steps.q.outputs.waiting != '0'
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg espeak-ng fonts-dejavu-core zip > /dev/null
+          PUPPETEER_SKIP_DOWNLOAD=1 npm ci --no-audit --no-fund --ignore-scripts
+          python3 -m pip install --quiet --user piper-tts==1.8.0
+          mkdir -p ~/.piper && cd ~/.piper
+          base=https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium
+          curl -fsSL -o en_US-lessac-medium.onnx "$base.onnx" && curl -fsSL -o en_US-lessac-medium.onnx.json "$base.onnx.json"
+          echo "5efe09e69902187827af646e1a6e9d269dee769f9877d17b16b1b46eeaaf019f  en_US-lessac-medium.onnx" | sha256sum -c - || rm -f en_US-lessac-medium.onnx
+          ffmpeg -hide_banner -filters 2>/dev/null | grep -E " (drawtext|ssim|zoompan) " | awk '{print $2}' | tr '\n' ' '; echo
+      - name: Work the queue
+        if: steps.q.outputs.waiting != '0'
+        env:
+          ATH_CHROME: /usr/bin/google-chrome
+        run: node runner/ath-runner.mjs --work --minutes 14

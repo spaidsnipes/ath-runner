@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>ATH game</title>
+<style>html,body{margin:0;height:100%;background:#0b0d10;color:#f4ebd0;font:16px system-ui,sans-serif;overflow:hidden;touch-action:none}
+canvas{display:block;width:100vw;height:100vh}#hud{position:fixed;top:12px;left:0;right:0;text-align:center;pointer-events:none}
+#hud b{display:block;font-size:22px}#start{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(11,13,16,.82);padding:24px;text-align:center;box-sizing:border-box}
+#start[hidden]{display:none}
+#start button{min-height:52px;padding:0 28px;border-radius:12px;border:0;font:600 18px system-ui;cursor:pointer}</style></head>
+<body><canvas id="c"></canvas><div id="hud"><b id="t"></b><span id="s">Score 0</span></div>
+<div id="start"><strong id="st" style="font-size:26px"></strong><span>Catch the falling stars. Drag or use the arrow keys.</span><button id="go">Play</button></div>
+<script id="cfg" type="application/json">/*ATH_CONFIG*/{}</script>
+<script>
+const C = Object.assign({ title: "Catch", color: "#D4AF37", speed: 2 }, JSON.parse(document.getElementById("cfg").textContent || "{}"));
+const cv = document.getElementById("c"), x = cv.getContext("2d");
+let W, H, px, stars = [], score = 0, lives = 3, on = false, keys = {}, last = 0, spawn = 0;
+const demo = new URLSearchParams(location.search).has("demo");
+document.getElementById("t").textContent = C.title; document.getElementById("st").textContent = C.title;
+function size() { W = cv.width = innerWidth; H = cv.height = innerHeight; px = px ?? W / 2; }
+addEventListener("resize", size); size();
+addEventListener("keydown", (e) => keys[e.key] = true); addEventListener("keyup", (e) => keys[e.key] = false);
+cv.addEventListener("pointermove", (e) => { if (e.buttons || e.pointerType === "touch") px = e.clientX; });
+cv.addEventListener("pointerdown", (e) => px = e.clientX);
+function start() { score = 0; lives = 3; stars = []; on = true; document.getElementById("start").hidden = true; }
+document.getElementById("go").onclick = start; document.getElementById("go").style.background = C.color;
+function step(t) {
+  const dt = Math.min(0.05, (t - last) / 1000 || 0); last = t;
+  x.fillStyle = "#0b0d10"; x.fillRect(0, 0, W, H);
+  for (let i = 0; i < 40; i++) { x.fillStyle = "rgba(244,235,208," + (0.15 + (i % 5) / 20) + ")"; x.fillRect((i * 97) % W, (i * 53 + t / 40 * (1 + i % 3)) % H, 2, 2); }
+  if (on) {
+    spawn -= dt; if (spawn <= 0) { stars.push({ x: 20 + Math.random() * (W - 40), y: -20, v: (120 + Math.random() * 80) * C.speed / 2 + score * 2 }); spawn = 0.9 / C.speed; }
+    if (demo && stars.length) { const tgt = stars.reduce((a, b) => (b.y > a.y ? b : a)); px += Math.sign(tgt.x - px) * Math.min(Math.abs(tgt.x - px), 600 * dt); }
+    if (keys.ArrowLeft) px -= 500 * dt; if (keys.ArrowRight) px += 500 * dt;
+    px = Math.max(40, Math.min(W - 40, px));
+    for (const s of stars) s.y += s.v * dt;
+    stars = stars.filter((s) => { if (s.y > H - 60 && s.y < H - 30 && Math.abs(s.x - px) < 48) { score++; return false; } if (s.y > H) { lives--; return false; } return true; });
+    if (lives <= 0) { on = false; const st = document.getElementById("start"); st.hidden = false; document.getElementById("st").textContent = "Score " + score + " · play again?"; }
+  }
+  x.fillStyle = C.color; for (const s of stars) { x.beginPath(); for (let k = 0; k < 10; k++) { const r = k % 2 ? 7 : 16, a = k * Math.PI / 5 - Math.PI / 2; x.lineTo(s.x + r * Math.cos(a), s.y + r * Math.sin(a)); } x.fill(); }
+  x.fillRect(px - 44, H - 44, 88, 14);
+  document.getElementById("s").textContent = "Score " + score + " · Lives " + lives;
+  requestAnimationFrame(step);
+}
+if (demo) start();
+requestAnimationFrame(step);
+</script></body></html>
