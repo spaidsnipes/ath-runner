@@ -94,14 +94,14 @@ async function speak(text, wav) {
 }
 
 // ---------- media.render ----------------------------------------------------------------------------------------------
-function textCards(dir, lines, W, H, seconds, brand) {
+function textCards(dir, lines, W, H, seconds, brand, lower = false) {
   // Each line gets its own time window; text goes through files (no escaping, expansion off).
   const f = [], size = Math.round(W * (W < H ? 0.062 : 0.045)), slot = seconds / Math.max(1, lines.length);
   lines.forEach((line, i) => {
     const file = join(dir, `line${i}.txt`); writeFileSync(file, wrap(line, W < H ? 22 : 36));
     const a = (i * slot).toFixed(2), b = ((i + 1) * slot - 0.15).toFixed(2);
     f.push(`drawtext=fontfile=${FONT}:textfile=${file}:expansion=none:fontsize=${size}:fontcolor=0xF4EBD0:line_spacing=${Math.round(size * 0.3)}` +
-      `:x=(w-text_w)/2:y=(h-text_h)/2:shadowcolor=black@0.7:shadowx=3:shadowy=3:enable='between(t,${a},${b})'` +
+      `:x=(w-text_w)/2:y=${lower ? `h*0.80-text_h/2:box=1:boxcolor=black@0.55:boxborderw=${Math.round(size * 0.45)}` : "(h-text_h)/2"}:shadowcolor=black@0.7:shadowx=3:shadowy=3:enable='between(t,${a},${b})'` +
       `:alpha='if(lt(t,${a}+0.35),(t-${a})/0.35,1)'`);
   });
   if (brand) { const file = join(dir, "brand.txt"); writeFileSync(file, brand);
@@ -116,7 +116,7 @@ async function mediaRender(p, io) {
   const [W, H] = aspect === "9:16" ? [1080, 1920] : [1280, 720];
   const voiceText = str(p.voice, 400, "voice", { required: format === "commercial", min: format === "commercial" ? 8 : 0 });
   const lines = (Array.isArray(p.lines) ? p.lines : []).slice(0, 4).map((l, i) => str(l, 70, `lines[${i}]`)).filter(Boolean);
-  const brand = str(p.brand ?? "Above The Hill", 40, "brand");
+  const brand = str(p.brand ?? (format === "commercial" ? "Above The Hill" : ""), 40, "brand");
   const dir = io.dir, out = join(dir, `${format}.mp4`);
   const seconds = format === "commercial" ? 15 : num(p.duration, 3, 60, 15, "duration");
   let voice = null, voiceWav = null;
@@ -130,7 +130,7 @@ async function mediaRender(p, io) {
       voiceWav = fast; voice.tempo = Number(tempo.toFixed(3)); voice.seconds = (await probe(fast)).durationSeconds;
     }
   }
-  const cards = textCards(dir, lines, W, H, seconds, brand);
+  const cards = textCards(dir, lines, W, H, seconds, brand, format === "clip");
   const args = ["-y", "-v", "error"];
   let vf, srcAudio = false;
   if (format === "commercial") {
