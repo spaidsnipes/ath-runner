@@ -40,7 +40,7 @@ function run(cmd, args, { input, timeoutMs = 300000, cwd } = {}) {
 }
 async function must(cmd, args, opts) {
   const r = await run(cmd, args, opts);
-  if (r.code !== 0) throw new Error(`${cmd} failed (${r.code}): ${r.err.split("\n").filter(Boolean).slice(-3).join(" | ").slice(0, 400)}`);
+  if (r.code !== 0) throw new Error(`${cmd} ${r.code == null ? "timed out or was killed" : "failed"} (${r.code}) [${String(args.find((a) => /\.(py|mjs)$/.test(a)) || args[0] || "").split("/").pop()} ${args[1] && !/^-/.test(args[1]) ? args[1] : ""}]: ${r.err.split("\n").filter(Boolean).slice(-3).join(" | ").slice(0, 400)}`);
   return r;
 }
 const sha256 = (f) => createHash("sha256").update(readFileSync(f)).digest("hex");
@@ -208,7 +208,7 @@ async function mediaSpot(p, io) {
   const o = p.aspect === "16:9" ? "h" : "v";
   const kitPath = storagePath(p.source, "source", [".zip"]);
   if (!kitPath) throw new Error("spot needs source (the private kit zip, e.g. in/commercials/kit-v3.zip)");
-  const t0 = Date.now(), lap = {}; const mark = (k) => { lap[k] = Number(((Date.now() - t0) / 1000).toFixed(1)); };
+  const t0 = Date.now(), lap = {}; const mark = (k) => { lap[k] = Number(((Date.now() - t0) / 1000).toFixed(1)); log(`spot ${spot}-${o}: ${k} done at ${lap[k]}s`); };
   const dir = io.dir, kit = join(dir, "kit"), raw = join(dir, "raw"), np = join(dir, "raw-np"), work = join(dir, "work");
   for (const d of [kit, raw, np, work]) mkdirSync(d, { recursive: true });
   await io.fetchInput(kitPath, join(dir, "kit.zip"));
@@ -217,7 +217,7 @@ async function mediaSpot(p, io) {
   const { captureClips } = await import("./commercial/capture.mjs");
   const captured = await captureClips(clips, raw, CHROME); mark("capture");
   const blurred = {};
-  for (const c of clips) blurred[c] = await py([join(KIT, "priceguard.py"), "blur", join(raw, c + ".mp4"), join(np, c + ".mp4")]);
+  for (const c of clips) blurred[c] = await py([join(KIT, "priceguard.py"), "blur", join(raw, c + ".mp4"), join(np, c + ".mp4")], 240000);
   mark("priceblur");
   const out = join(dir, `${spot}-${o === "v" ? "9x16" : "16x9"}.mp4`);
   const built = await py([join(KIT, "build.py"), "build", spot, o, "--kit", kit, "--raw", np, "--work", work, "--out", out, "--models", KOKORO_DIR], 480000);

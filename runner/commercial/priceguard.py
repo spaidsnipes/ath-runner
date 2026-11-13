@@ -8,7 +8,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 PRICE = re.compile(r"(\$\s?\d)|(\d\s?/\s?mo\b)|(/\s?mo(nth)?\b)|(\b(a|per)\s+month\b)|(\d+(\.\d\d)?\s?(usd|dollars?)\b)", re.I)
 
-def sh(*a): return subprocess.run([str(x) for x in a], capture_output=True, text=True)
+def sh(*a): return subprocess.run([str(x) for x in a], capture_output=True, text=True, env={**os.environ, "OMP_THREAD_LIMIT": "1"})
+OCR_MAX = 1280   # frames are OCR'd at most this wide/tall (speed); boxes are scaled back to the video's pixels
 
 def ocr(img):
     r = sh("tesseract", img, "stdout", "--psm", "11", "tsv")
@@ -30,16 +31,18 @@ def ocr(img):
 def scan(video, fps=2.0):
     td = tempfile.mkdtemp(prefix="pg-")
     try:
-        sh("ffmpeg", "-v", "error", "-i", video, "-vf", f"fps={fps}", "-q:v", "2", f"{td}/%05d.png")
+        W, H = map(int, sh("ffprobe", "-v", "error", "-select_streams", "v", "-show_entries", "stream=width,height", "-of", "csv=p=0", video).stdout.strip().split(","))
+        k = min(1.0, OCR_MAX / max(W, H))
+        sh("ffmpeg", "-v", "error", "-i", video, "-vf", f"fps={fps},scale={int(W * k) // 2 * 2}:-2", "-q:v", "2", f"{td}/%05d.png")
         frames = sorted(glob.glob(f"{td}/*.png"))
         with ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as ex: res = list(ex.map(ocr, frames))
         out = []
         for i, hs in enumerate(res):
-            for h in hs: out.append({"t": round(i / fps, 2), **h})
+            for h in hs: out.append({"t": round(i / fps, 2), "text": h["text"], "box": [int(v / k) for v in h["box"]]})
         return out, len(frames)
     finally: shutil.rmtree(td, ignore_errors=True)
 
-def blur(src, dst, fps=4.0):
+def blur(src, dst, fps=3.0):
     hits, _ = scan(src, fps)
     if not hits: shutil.copyfile(src, dst); return {"boxes": 0}
     W, H = map(int, sh("ffprobe", "-v", "error", "-select_streams", "v", "-show_entries", "stream=width,height", "-of", "csv=p=0", src).stdout.strip().split(","))
