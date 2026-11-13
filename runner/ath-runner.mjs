@@ -117,6 +117,7 @@ function textCards(dir, lines, W, H, seconds, brand, lower = false, endCard = 0)
 function wrap(s, n) { const out = []; let cur = ""; for (const w of s.split(/\s+/)) { if ((cur + " " + w).trim().length > n && cur) { out.push(cur); cur = w; } else cur = (cur + " " + w).trim(); } if (cur) out.push(cur); return out.join("\n"); }
 
 async function mediaRender(p, io) {
+  if (p.format === "spot") return mediaSpot(p, io);
   const format = p.format === "clip" ? "clip" : "commercial";
   const aspect = p.aspect === "16:9" ? "16:9" : "9:16";
   const [W, H] = aspect === "9:16" ? [1080, 1920] : [1280, 720];
@@ -190,6 +191,47 @@ async function mediaRender(p, io) {
   const outputs = [await io.store(out, `${format}.mp4`), await io.store(poster, "poster.png")];
   return { format, aspect, title: lines[0] || null, ...info, meanVolumeDb: mean, voiceBakedIn: !!voiceWav && info.hasAudio, voice, afterVoiceSeconds: silentTail, endCardSeconds: endCard || null, outputs,
     note: voice?.engine === "espeak-ng" ? "voice used the espeak-ng fallback (robotic); Piper was unavailable on this run" : null };
+}
+
+// ---------- media.render format "spot": the graded ATH commercials v3 (apartment walkthrough) -------------------------
+// Port of the Mac kit (~/ath-canon-live/shift-1112/commercials-kit build3/spots3/qa3) so renders stop using the Mac.
+// Payload: {format:"spot", spot:"hook1", aspect:"9:16"|"16:9", source:"in/commercials/kit-v3.zip"}
+// The kit zip (Flow room stills + door clip, Dspaid's songs) is private: it lives in the ath-worker bucket and is fetched
+// through the gate's signed URL; nothing private is in this public repo. App footage is captured live, here, headless.
+const KIT = join(ROOT, "runner", "commercial");
+const KOKORO_DIR = process.env.KOKORO_DIR || join(process.env.HOME || "/tmp", ".kokoro");
+async function py(args, timeoutMs = 300000) { return JSON.parse((await must("python3", [...args], { timeoutMs })).out.trim().split("\n").pop()); }
+async function mediaSpot(p, io) {
+  const names = await py([join(KIT, "build.py"), "list"]);
+  const spot = typeof p.spot === "string" && names.includes(p.spot) ? p.spot : null;
+  if (!spot) throw new Error(`spot must be one of ${names.join(", ")}`);
+  const o = p.aspect === "16:9" ? "h" : "v";
+  const kitPath = storagePath(p.source, "source", [".zip"]);
+  if (!kitPath) throw new Error("spot needs source (the private kit zip, e.g. in/commercials/kit-v3.zip)");
+  const t0 = Date.now(), lap = {}; const mark = (k) => { lap[k] = Number(((Date.now() - t0) / 1000).toFixed(1)); };
+  const dir = io.dir, kit = join(dir, "kit"), raw = join(dir, "raw"), np = join(dir, "raw-np"), work = join(dir, "work");
+  for (const d of [kit, raw, np, work]) mkdirSync(d, { recursive: true });
+  await io.fetchInput(kitPath, join(dir, "kit.zip"));
+  await must("unzip", ["-q", "-o", join(dir, "kit.zip"), "-d", kit]); mark("kit");
+  const clips = await py([join(KIT, "build.py"), "clips", spot, o]);
+  const { captureClips } = await import("./commercial/capture.mjs");
+  const captured = await captureClips(clips, raw, CHROME); mark("capture");
+  const blurred = {};
+  for (const c of clips) blurred[c] = await py([join(KIT, "priceguard.py"), "blur", join(raw, c + ".mp4"), join(np, c + ".mp4")]);
+  mark("priceblur");
+  const out = join(dir, `${spot}-${o === "v" ? "9x16" : "16x9"}.mp4`);
+  const built = await py([join(KIT, "build.py"), "build", spot, o, "--kit", kit, "--raw", np, "--work", work, "--out", out, "--models", KOKORO_DIR], 480000);
+  mark("render");
+  const qa = await py([join(KIT, "qa.py"), out, built.file + (o === "v" ? "-9x16" : "-16x9")]); mark("qa");
+  if (qa.price.priceFrames > 0) throw new Error(`value first: OCR found price text in ${qa.price.priceFrames} frame(s): ${qa.price.samples.join(" / ")}`);
+  const poster = join(dir, "poster.png");
+  await must("ffmpeg", ["-y", "-v", "error", "-ss", String(Math.min(3, qa.seconds / 3)), "-i", out, "-frames:v", "1", poster]);
+  const qaFile = join(dir, "qa.json"); writeFileSync(qaFile, JSON.stringify({ spot, ...built, qa, captured, blurred }, null, 2));
+  const info = await probe(out);
+  const outputs = [await io.store(out, `${spot}-${o === "v" ? "9x16" : "16x9"}.mp4`), await io.store(poster, "poster.png"), await io.store(qaFile, "qa.json")];
+  return { format: "spot", ...built, ...info, grade: qa.pass ? "PASS" : "CHECK: " + Object.entries(qa.checks).filter(([, v]) => !v).map(([k]) => k).join(", "),
+    qa, footage: captured.map((c) => ({ clip: c.clip, url: c.url })), priceBlur: Object.fromEntries(Object.entries(blurred).map(([k, v]) => [k, v.boxes])), seconds: lap, outputs,
+    note: "AI voice (Kokoro) + AI room imagery (Google Flow), labelled on the end card; every screen is the real live app captured in this run" };
 }
 
 // ---------- visual.compare (Visual Twin) ------------------------------------------------------------------------------
@@ -334,7 +376,7 @@ if (argv[0] === "--peek") {
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `waiting=${hb.away_mode ? hb.waiting : 0}\n`);
 } else if (argv[0] === "--work") {
   const i = argv.indexOf("--minutes"), m = i > 0 ? Number(argv[i + 1]) : 12;
-  const n = await work(Number.isFinite(m) ? Math.min(Math.max(m, 3), 15) : 12);
+  const n = await work(Number.isFinite(m) ? Math.min(Math.max(m, 3), 25) : 12);
   log(`finished ${n} job(s)`);
 } else if (argv[0] === "--local") {
   const [, kind, payloadFile, outDir] = argv;
