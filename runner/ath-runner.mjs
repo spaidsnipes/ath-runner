@@ -14,6 +14,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, statSync, readdirS
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { makeStudiosRender } from "./studios-render.mjs";
 
 const GATE = "https://zrzaifaxecwgpfrqctkp.supabase.co/functions/v1/ath-runner";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -307,10 +308,11 @@ async function gameBuild(p, io) {
     note: "playable HTML5 game: unzip and open index.html (touch or arrow keys)" };
 }
 
-const HANDLERS = { "media.render": mediaRender, "visual.compare": visualCompare, "game.build": gameBuild };
+const studiosRender = makeStudiosRender({ must, probe, sha256, storagePath, font: FONT, run });
+const HANDLERS = { "media.render": mediaRender, "visual.compare": visualCompare, "game.build": gameBuild, "studios.render": studiosRender };
 // The named ATHOS assistants (Founder 2026-11-12: "each worker gets its own name and job"); same names as Spaidbot's
 // spaidbot/sb-athos-team.mjs. Stamped on every result so receipts say who did the work.
-export const ASSISTANT = (kind, p = {}) => kind === "media.render" ? (p.format === "clip" ? "ATHOS · Reel" : "ATHOS · Herald") : kind === "visual.compare" ? "ATHOS · Lens" : kind === "game.build" ? "ATHOS · Forge" : "ATHOS";
+export const ASSISTANT = (kind, p = {}) => kind === "media.render" ? (p.format === "clip" ? "ATHOS · Reel" : "ATHOS · Herald") : kind === "visual.compare" ? "ATHOS · Lens" : kind === "game.build" ? "ATHOS · Forge" : kind === "studios.render" ? "ATHOS · Studios" : "ATHOS";
 
 // ---------- queue gate ------------------------------------------------------------------------------------------------
 let tok = null, tokAt = 0;
