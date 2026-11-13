@@ -137,9 +137,19 @@ export function wrap(s, w) { return s.split("\n").map((line) => { const out = []
 // ---------- handler ----------
 export function makeStudiosRender({ must, probe, sha256, storagePath, font, run }) {
   return async function studiosRender(p, io) {
-    const source = storagePath(p.source, "source", [".zip"]); if (!source || !/^in\/studios\/[0-9a-f-]{36}\//.test(source)) throw new Error("source must be a Studios bundle (in/studios/<passport>/...zip)");
-    const dir = io.dir, zipFile = join(dir, "bundle.zip");
-    await io.fetchInput(source, zipFile);
+    // the bundle arrives in 1–4 parts (source, reference, live, background), each ≤48 MB; joined in that order
+    const keys = ["source", "reference", "live", "background"], inParts = [];
+    for (const [i, k] of keys.entries()) {
+      if (p[k] == null) break;
+      const v = storagePath(p[k], k, [".zip"]);
+      if (!v || !new RegExp(`^in/studios/[0-9a-f-]{36}/[A-Za-z0-9._-]{1,80}/bundle\\.p${i}\\.zip$`).test(v)) throw new Error(`${k} must be part ${i} of a Studios bundle`);
+      inParts.push(v);
+    }
+    if (!inParts.length) throw new Error("source must be a Studios bundle (in/studios/<passport>/<render>/bundle.p0.zip)");
+    if (new Set(inParts.map((x) => x.split("/").slice(0, 4).join("/"))).size !== 1) throw new Error("bundle parts must come from one render folder");
+    const dir = io.dir, zipFile = join(dir, "bundle.zip"), bufs = [];
+    for (const [i, part] of inParts.entries()) { const f = join(dir, `bundle.p${i}.zip`); await io.fetchInput(part, f); bufs.push(readFileSync(f)); }
+    writeFileSync(zipFile, Buffer.concat(bufs));
     const files = readZip(readFileSync(zipFile));
     for (const [name, buf] of files) writeFileSync(join(dir, name), buf);
     if (!files.has("edl.json")) throw new Error("bundle has no edl.json");
